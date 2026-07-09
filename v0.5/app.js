@@ -77,7 +77,28 @@
   const toastEl = document.getElementById('toast');
 
   let currentlyViewedNote = null;
+  let currentSubject = null;
   let dictationSession = null;
+
+  const SUBJECT_ALIASES = {
+    'biologia': ['bio','biologia','ciencias biologicas','biologicas'],
+    'ciencias sociales': ['sociales','ciencias sociales','cs sociales','c sociales'],
+    'informatica': ['info','informatica','computacion','computación'],
+    'ingles': ['ingles','english']
+  };
+
+  async function resolveSubject(rawText) {
+    const subjects = await window.AppDatabase.getAllSubjects();
+    const text = normalize(rawText);
+    let match = subjects.find(s => text.includes(normalize(s.name)));
+    if (match) return match;
+    for (const subject of subjects) {
+      const key = normalize(subject.name);
+      const aliases = SUBJECT_ALIASES[key] || [];
+      if (aliases.some(alias => text.includes(normalize(alias)))) return subject;
+    }
+    return null;
+  }
 
   // ---------- Utilidades ----------
 
@@ -129,7 +150,7 @@
 
       const item = document.createElement('div');
       item.className = 'sidebar-subject-item';
-      item.innerHTML = `<span>${escapeHtml(subject.name)}</span><span class="sidebar-subject-count">${count}</span>`;
+      item.innerHTML = `<span class="subject-button-name">${escapeHtml(subject.name)}</span><span class="subject-button-end"><span class="sidebar-subject-count">${count}</span><span aria-hidden="true">›</span></span>`;
       item.addEventListener('click', () => openSubjectInNotesScreen(subject));
       subjectsListEl.appendChild(item);
 
@@ -387,8 +408,8 @@
     viewToShow.classList.remove('hidden');
   }
 
-  backToBrowsingBtn.addEventListener('click', () => showInternalView(browsingViewEl));
-  backFromNoteBtn.addEventListener('click', () => showInternalView(browsingViewEl));
+  backToBrowsingBtn.addEventListener('click', showChatScreen);
+  backFromNoteBtn.addEventListener('click', () => { noteDetailViewEl.classList.add('hidden'); });
 
   function buildNoteCard(note) {
     const card = document.createElement('div');
@@ -401,6 +422,7 @@
   }
 
   async function openSubjectInNotesScreen(subject) {
+    currentSubject = subject;
     showNotesScreen();
     subjectDetailTitleEl.textContent = subject.name;
     const notes = await window.AppDatabase.getNotesBySubject(subject.id);
@@ -429,7 +451,7 @@
     noteDetailMetaEl.textContent = formatNoteMeta(note);
     noteDetailContentEl.textContent = note.content;
     closeNoteEditForm();
-    showInternalView(noteDetailViewEl);
+    noteDetailViewEl.classList.remove('hidden');
   }
 
   deleteNoteBtn.addEventListener('click', async () => {
@@ -441,8 +463,9 @@
       await window.AppDatabase.deleteNote(currentlyViewedNote.id);
       showToast('Apunte eliminado.');
       currentlyViewedNote = null;
+      noteDetailViewEl.classList.add('hidden');
       await renderSubjectsSidebar();
-      showInternalView(browsingViewEl);
+      if (currentSubject) await openSubjectInNotesScreen(currentSubject);
     } catch (error) {
       showToast('No se pudo eliminar el apunte.');
     }
@@ -544,8 +567,7 @@
   }
 
   async function handleSubjectVoiceCommand(rawText) {
-    const normalized = normalize(rawText);
-    const subject = await window.AppDatabase.findSubjectByNormalizedName(normalized);
+    const subject = await resolveSubject(rawText);
 
     if (!subject) {
       commandStatusText.textContent = 'No pude identificar la materia.';
@@ -642,12 +664,23 @@
     return title;
   }
 
+  async function enrichNoteWithAI(content, subjectName) {
+    try {
+      const response = await fetch('/.netlify/functions/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'enrich_note', content, subjectName })
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (_) { return null; }
+  }
+
   async function finishNote() {
     if (!dictationSession) return;
 
     const content = dictationSession.transcriptParts.join(' ').trim();
     const durationSeconds = Math.floor((Date.now() - dictationSession.startTime) / 1000);
-    const title = generateProvisionalTitle(content);
+    let title = generateProvisionalTitle(content);
 
     clearInterval(dictationSession.timerInterval);
     window.SpeechController.stop();
@@ -660,6 +693,8 @@
     }
 
     try {
+      const ai = await enrichNoteWithAI(content, dictationSession.subjectName);
+      if (ai?.title) title = ai.title;
       await window.AppDatabase.createNote({
         subjectId: dictationSession.subjectId,
         subjectName: dictationSession.subjectName,
@@ -668,7 +703,8 @@
         durationSeconds,
       });
       showToast('Apunte guardado correctamente.');
-      appendAssistantBubble(`Guardé tu apunte "${title}" en ${dictationSession.subjectName}.`);
+      const aiMessage = ai?.summary ? ` Resumen IA: ${ai.summary}` : '';
+      appendAssistantBubble(`Guardé tu apunte "${title}" en ${dictationSession.subjectName}.${aiMessage}`);
       await renderSubjectsSidebar();
     } catch (error) {
       showToast('Ocurrió un error al guardar el apunte.');

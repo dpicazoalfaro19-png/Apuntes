@@ -26,7 +26,18 @@ exports.handler = async function (event) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Cuerpo de la petición inválido.' }) };
   }
 
-  const { message, subjectNames } = body;
+  const { message, subjectNames, action, content, subjectName } = body;
+
+  if (action === 'enrich_note') {
+    if (!content) return { statusCode: 400, body: JSON.stringify({ error: 'Falta content.' }) };
+    const prompt = `Analiza este apunte de ${subjectName || 'una materia'}. Devuelve SOLO JSON válido con title (máximo 8 palabras), summary (máximo 30 palabras) y tags (array de máximo 4 conceptos). No inventes información. Apunte: ${content}`;
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({contents:[{parts:[{text:prompt}]}]}) });
+      if (!r.ok) return { statusCode: 502, body: JSON.stringify({ error:'IA no disponible.' }) };
+      const d=await r.json(); const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+      return { statusCode:200, body:JSON.stringify(JSON.parse(raw.replace(/```json|```/g,'').trim())) };
+    } catch(e) { return { statusCode:502, body:JSON.stringify({error:'IA no disponible.'}) }; }
+  }
 
   if (!message || !Array.isArray(subjectNames)) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Faltan datos: message o subjectNames.' }) };
