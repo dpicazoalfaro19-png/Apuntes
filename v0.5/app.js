@@ -17,9 +17,13 @@
   const chatMicBtn = document.getElementById('chat-mic-btn');
 
   const plusMenuBtn = document.getElementById('plus-menu-btn');
-  const plusMenu = document.getElementById('plus-menu');
   const plusManualNoteBtn = document.getElementById('plus-manual-note-btn');
   const plusVoiceNoteBtn = document.getElementById('plus-voice-note-btn');
+
+  const assistantFabBtn = document.getElementById('assistant-fab');
+  const assistantFabBadge = document.getElementById('assistant-fab-badge');
+  const assistantPanel = document.getElementById('assistant-panel');
+  const assistantPanelCloseBtn = document.getElementById('assistant-panel-close-btn');
 
   const themeLightBtn = document.getElementById('theme-light-btn');
   const themeDarkBtn = document.getElementById('theme-dark-btn');
@@ -210,6 +214,7 @@
 
     chatLogEl.appendChild(bubble);
     chatLogEl.scrollTop = chatLogEl.scrollHeight;
+    notifyAssistantUpdate();
   }
 
   async function sendChatMessage(text) {
@@ -305,19 +310,13 @@
     });
   });
 
-  // ---------- Menú "+" ----------
+  // ---------- Orbe central: dispara directo el comando de voz ----------
 
-  plusMenuBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    plusMenu.classList.toggle('hidden');
-  });
-
-  document.addEventListener('click', () => {
-    plusMenu.classList.add('hidden');
+  plusMenuBtn.addEventListener('click', () => {
+    openCommandModal();
   });
 
   plusManualNoteBtn.addEventListener('click', async () => {
-    plusMenu.classList.add('hidden');
     await renderSubjectsSidebar();
     manualNoteTitleInput.value = '';
     manualNoteContentInput.value = '';
@@ -325,12 +324,56 @@
   });
 
   plusVoiceNoteBtn.addEventListener('click', () => {
-    plusMenu.classList.add('hidden');
     openCommandModal();
   });
 
   cancelManualNoteBtn.addEventListener('click', () => {
     manualNoteModal.classList.add('hidden');
+  });
+
+  // ---------- Panel flotante del asistente (chat) ----------
+
+  let assistantHasUnread = false;
+
+  function openAssistantPanel() {
+    assistantPanel.classList.remove('hidden');
+    assistantFabBadge.classList.add('hidden');
+    assistantHasUnread = false;
+    chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  }
+
+  function closeAssistantPanel() {
+    assistantPanel.classList.add('hidden');
+  }
+
+  function toggleAssistantPanel() {
+    if (assistantPanel.classList.contains('hidden')) {
+      openAssistantPanel();
+    } else {
+      closeAssistantPanel();
+    }
+  }
+
+  function notifyAssistantUpdate() {
+    if (assistantPanel.classList.contains('hidden')) {
+      assistantHasUnread = true;
+      assistantFabBadge.classList.remove('hidden');
+    }
+  }
+
+  assistantFabBtn.addEventListener('click', toggleAssistantPanel);
+  assistantPanelCloseBtn.addEventListener('click', closeAssistantPanel);
+
+  document.addEventListener('click', (event) => {
+    if (assistantPanel.classList.contains('hidden')) return;
+    if (assistantPanel.contains(event.target) || assistantFabBtn.contains(event.target)) return;
+    closeAssistantPanel();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !assistantPanel.classList.contains('hidden')) {
+      closeAssistantPanel();
+    }
   });
 
   saveManualNoteBtn.addEventListener('click', async () => {
