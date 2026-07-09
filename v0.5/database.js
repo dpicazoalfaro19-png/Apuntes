@@ -6,9 +6,10 @@
  */
 
 const DB_NAME = 'mis-apuntes-ia-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_SUBJECTS = 'subjects';
 const STORE_NOTES = 'notes';
+const STORE_TRASH = 'trash';
 
 const INITIAL_SUBJECTS = ['Biología', 'Ciencias Sociales', 'Informática'];
 
@@ -51,6 +52,12 @@ function openDatabase() {
       if (!db.objectStoreNames.contains(STORE_SUBJECTS)) {
         const subjectsStore = db.createObjectStore(STORE_SUBJECTS, { keyPath: 'id' });
         subjectsStore.createIndex('normalizedName', 'normalizedName', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_TRASH)) {
+        const trashStore = db.createObjectStore(STORE_TRASH, { keyPath: 'id' });
+        trashStore.createIndex('deletedAt', 'deletedAt', { unique: false });
+        trashStore.createIndex('subjectName', 'subjectName', { unique: false });
       }
 
       if (!db.objectStoreNames.contains(STORE_NOTES)) {
@@ -241,12 +248,39 @@ function getNotesBySubject(subjectId) {
  */
 function deleteNote(noteId) {
   return new Promise((resolve, reject) => {
-    const transaction = dbInstance.transaction([STORE_NOTES], 'readwrite');
-    const store = transaction.objectStore(STORE_NOTES);
-    const request = store.delete(noteId);
+    const transaction = dbInstance.transaction([STORE_NOTES, STORE_TRASH], 'readwrite');
+    const notes = transaction.objectStore(STORE_NOTES);
+    const trash = transaction.objectStore(STORE_TRASH);
+    const getRequest = notes.get(noteId);
+    getRequest.onsuccess = () => {
+      const note = getRequest.result;
+      if (!note) { resolve(); return; }
+      trash.put({ ...note, deletedAt: new Date().toISOString() });
+      notes.delete(noteId);
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(new Error('No se pudo mover el apunte a la papelera.'));
+  });
+}
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(new Error('No se pudo eliminar el apunte.'));
+function getTrashNotes() {
+  return new Promise((resolve, reject) => {
+    const tx = dbInstance.transaction([STORE_TRASH], 'readonly');
+    const req = tx.objectStore(STORE_TRASH).getAll();
+    req.onsuccess = () => resolve((req.result || []).sort((a,b)=>new Date(b.deletedAt)-new Date(a.deletedAt)));
+    req.onerror = () => reject(new Error('No se pudo leer la papelera.'));
+  });
+}
+
+async function deleteSubject(subjectId) {
+  const subject = (await getAllSubjects()).find(s => s.id === subjectId);
+  if (!subject) return;
+  const notes = await getNotesBySubject(subjectId);
+  for (const note of notes) await deleteNote(note.id);
+  return new Promise((resolve,reject)=>{
+    const tx=dbInstance.transaction([STORE_SUBJECTS],'readwrite');
+    tx.objectStore(STORE_SUBJECTS).delete(subjectId);
+    tx.oncomplete=()=>resolve(); tx.onerror=()=>reject(new Error('No se pudo eliminar la materia.'));
   });
 }
 
@@ -291,4 +325,6 @@ window.AppDatabase = {
   getAllNotes,
   getNotesBySubject,
   deleteNote,
+  getTrashNotes,
+  deleteSubject,
 };

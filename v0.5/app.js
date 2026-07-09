@@ -499,7 +499,7 @@
   backToChatBtn.addEventListener('click', showChatScreen);
 
   function showInternalView(viewToShow) {
-    [browsingViewEl, subjectDetailViewEl, noteDetailViewEl].forEach((v) => v.classList.add('hidden'));
+    [browsingViewEl, subjectDetailViewEl, noteDetailViewEl, document.getElementById('trash-view')].forEach((v) => v.classList.add('hidden'));
     viewToShow.classList.remove('hidden');
   }
 
@@ -572,7 +572,7 @@
 
   deleteNoteBtn.addEventListener('click', async () => {
     if (!currentlyViewedNote) return;
-    const confirmed = window.confirm('¿Eliminar este apunte? Esta acción no se puede deshacer.');
+    const confirmed = window.confirm('¿Eliminar este apunte? Se moverá a la Papelera.');
     if (!confirmed) return;
 
     try {
@@ -848,6 +848,63 @@
 
   finishNoteBtn.addEventListener('click', () => finishNote());
   cancelDictationBtn.addEventListener('click', () => endDictationSession(false));
+
+
+  // ---------- Menú de materias y Papelera ----------
+  const subjectsMenuBtn = document.getElementById('subjects-menu-btn');
+  const subjectsPopover = document.getElementById('subjects-popover');
+  const trashBtn = document.getElementById('trash-btn');
+  const trashViewEl = document.getElementById('trash-view');
+  const trashListEl = document.getElementById('trash-notes-list');
+  const trashSearchForm = document.getElementById('trash-search-form');
+  const trashSearchInput = document.getElementById('trash-search-input');
+  const trashSearchAction = document.getElementById('trash-search-action');
+  const trashRecentBtn = document.getElementById('trash-recent-btn');
+  const trashAllBtn = document.getElementById('trash-all-btn');
+  const trashSubjectsBtn = document.getElementById('trash-subjects-btn');
+  const trashSubjectsMenu = document.getElementById('trash-subjects-menu');
+  const deleteSubjectBtn = document.getElementById('delete-subject-btn');
+  let trashMode = 'recent', trashSubject = null, trashStableQuery = '';
+
+  subjectsMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); subjectsPopover.classList.toggle('hidden'); });
+  subjectsPopover.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => subjectsPopover.classList.add('hidden'));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') subjectsPopover.classList.add('hidden'); });
+
+  deleteSubjectBtn.addEventListener('click', async () => {
+    if (!currentSubject) return;
+    if (!window.confirm(`¿Estás seguro de eliminar la materia ${currentSubject.name}?`)) return;
+    try { await window.AppDatabase.deleteSubject(currentSubject.id); currentSubject=null; await renderSubjectsSidebar(); showSuccessGlow(); showChatScreen(); }
+    catch (_) { showToast('No se pudo eliminar la materia.'); }
+  });
+
+  function setTrashFilter(mode) {
+    trashMode=mode; trashSubject=null;
+    [trashRecentBtn,trashAllBtn,trashSubjectsBtn].forEach(b=>b.classList.remove('active'));
+    (mode==='recent'?trashRecentBtn:mode==='all'?trashAllBtn:trashSubjectsBtn).classList.add('active');
+  }
+  function trashMatches(note, query) {
+    if (!query) return true;
+    const q=normalize(query), hay=normalize(`${note.title} ${note.content} ${note.subjectName} ${note.date} ${note.deletedAt}`);
+    return hay.includes(q);
+  }
+  async function renderTrash() {
+    let notes=await window.AppDatabase.getTrashNotes();
+    if (trashMode==='recent') { const limit=Date.now()-86400000; notes=notes.filter(n=>new Date(n.deletedAt).getTime()>=limit); }
+    if (trashMode==='subject' && trashSubject) notes=notes.filter(n=>n.subjectName===trashSubject);
+    const query=trashStableQuery || trashSearchInput.value.trim();
+    notes=notes.filter(n=>trashMatches(n,query)); trashListEl.innerHTML='';
+    if (!notes.length) { const p=document.createElement('p'); p.className='empty-state'; p.textContent='No hay apuntes eliminados que coincidan.'; trashListEl.appendChild(p); return; }
+    notes.forEach(note=>{ const card=buildNoteCard(note); card.onclick=null; const d=document.createElement('div'); d.className='trash-note-deleted'; d.textContent=`Eliminado: ${new Date(note.deletedAt).toLocaleString('es-MX')}`; card.appendChild(d); trashListEl.appendChild(card); });
+  }
+  async function openTrash() { showNotesScreen(); showInternalView(trashViewEl); setTrashFilter('recent'); trashStableQuery=''; trashSearchInput.value=''; trashSearchAction.innerHTML='<span class="material-symbols-outlined">search</span>'; await renderTrash(); }
+  trashBtn.addEventListener('click', openTrash);
+  trashRecentBtn.addEventListener('click', async()=>{setTrashFilter('recent');await renderTrash()});
+  trashAllBtn.addEventListener('click', async()=>{setTrashFilter('all');await renderTrash()});
+  trashSearchInput.addEventListener('input', async()=>{ if(trashStableQuery) return; await renderTrash(); });
+  trashSearchForm.addEventListener('submit', async e=>{e.preventDefault(); if(trashStableQuery){trashStableQuery='';trashSearchInput.value='';setTrashFilter('recent');trashSearchAction.innerHTML='<span class="material-symbols-outlined">search</span>';}else{trashStableQuery=trashSearchInput.value.trim();trashSearchAction.innerHTML='<span class="material-symbols-outlined">close</span>';} await renderTrash();});
+  trashSubjectsBtn.addEventListener('click', async e=>{e.stopPropagation(); const [current,deleted]=await Promise.all([window.AppDatabase.getAllSubjects(),window.AppDatabase.getTrashNotes()]); const names=[...new Set([...current.map(s=>s.name),...deleted.map(n=>n.subjectName)])].sort(); trashSubjectsMenu.innerHTML=''; names.forEach(name=>{const b=document.createElement('button');b.textContent=name;b.onclick=async()=>{setTrashFilter('subject');trashSubject=name;trashSubjectsBtn.classList.add('active');trashSubjectsMenu.classList.add('hidden');await renderTrash()};trashSubjectsMenu.appendChild(b)});trashSubjectsMenu.classList.toggle('hidden');});
+  document.addEventListener('click', e=>{if(!trashSubjectsMenu.contains(e.target)&&e.target!==trashSubjectsBtn)trashSubjectsMenu.classList.add('hidden')});
 
   // ---------- Inicialización ----------
 
