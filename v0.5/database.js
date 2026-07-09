@@ -135,6 +135,16 @@ async function createSubject(name) {
  * Devuelve todas las materias almacenadas.
  * @returns {Promise<Array<Object>>}
  */
+function getSubjectById(subjectId) {
+  return new Promise((resolve, reject) => {
+    if (!dbInstance) { resolve(null); return; }
+    const tx = dbInstance.transaction([STORE_SUBJECTS], 'readonly');
+    const req = tx.objectStore(STORE_SUBJECTS).get(String(subjectId));
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(new Error('No se pudo obtener la materia.'));
+  });
+}
+
 function getAllSubjects() {
   return new Promise((resolve, reject) => {
     if (!dbInstance) {
@@ -318,6 +328,7 @@ window.AppDatabase = {
   openDatabase,
   normalizeText,
   getAllSubjects,
+  getSubjectById,
   findSubjectByNormalizedName,
   createSubject,
   createNote,

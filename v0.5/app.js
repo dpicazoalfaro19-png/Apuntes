@@ -173,8 +173,13 @@
 
       const item = document.createElement('div');
       item.className = 'sidebar-subject-item';
+      item.dataset.subjectId = String(subject.id);
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
       item.innerHTML = `<span class="subject-button-name">${escapeHtml(subject.name)}</span><span class="subject-button-end"><span class="sidebar-subject-count">${count}</span><span aria-hidden="true">›</span></span>`;
-      item.addEventListener('click', () => openSubjectInNotesScreen(subject));
+      const selectSubject = () => openSubjectById(item.dataset.subjectId);
+      item.addEventListener('click', selectSubject);
+      item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectSubject(); } });
       subjectsListEl.appendChild(item);
 
       const option = document.createElement('option');
@@ -531,8 +536,16 @@
     return card;
   }
 
+  async function openSubjectById(subjectId) {
+    const subject = await window.AppDatabase.getSubjectById(String(subjectId));
+    if (!subject) { showToast('La materia seleccionada ya no existe.'); return; }
+    await openSubjectInNotesScreen(subject);
+    closeSubjectsMenu();
+  }
+
   async function openSubjectInNotesScreen(subject) {
     currentSubject = subject;
+    localStorage.setItem('vox-study-selected-subject-id', String(subject.id));
     showNotesScreen();
     subjectDetailTitleEl.textContent = subject.name;
     const notes = await window.AppDatabase.getNotesBySubject(subject.id);
@@ -866,15 +879,30 @@
   const deleteSubjectBtn = document.getElementById('delete-subject-btn');
   let trashMode = 'recent', trashSubject = null, trashStableQuery = '';
 
-  subjectsMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); subjectsPopover.classList.toggle('hidden'); });
+  // El popover vive en body para que ningún overflow/stacking context del sidebar pueda recortarlo.
+  if (subjectsPopover.parentElement !== document.body) document.body.appendChild(subjectsPopover);
+  function positionSubjectsMenu() {
+    const r = subjectsMenuBtn.getBoundingClientRect();
+    const gap = 10, margin = 12;
+    const width = Math.min(320, window.innerWidth - margin * 2);
+    let left = r.right + gap;
+    if (left + width > window.innerWidth - margin) left = Math.max(margin, r.left - width - gap);
+    const top = Math.max(margin, Math.min(r.top, window.innerHeight - 180));
+    subjectsPopover.style.left = `${left}px`; subjectsPopover.style.top = `${top}px`; subjectsPopover.style.width = `${width}px`;
+    subjectsPopover.style.maxHeight = `${Math.max(160, window.innerHeight - top - margin)}px`;
+  }
+  function closeSubjectsMenu() { subjectsPopover.classList.add('hidden'); }
+  function openSubjectsMenu() { positionSubjectsMenu(); subjectsPopover.classList.remove('hidden'); }
+  subjectsMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); subjectsPopover.classList.contains('hidden') ? openSubjectsMenu() : closeSubjectsMenu(); });
   subjectsPopover.addEventListener('click', e => e.stopPropagation());
-  document.addEventListener('click', () => subjectsPopover.classList.add('hidden'));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') subjectsPopover.classList.add('hidden'); });
+  document.addEventListener('click', closeSubjectsMenu);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSubjectsMenu(); });
+  window.addEventListener('resize', () => { if (!subjectsPopover.classList.contains('hidden')) positionSubjectsMenu(); });
 
   deleteSubjectBtn.addEventListener('click', async () => {
     if (!currentSubject) return;
     if (!window.confirm(`¿Estás seguro de eliminar la materia ${currentSubject.name}?`)) return;
-    try { await window.AppDatabase.deleteSubject(currentSubject.id); currentSubject=null; await renderSubjectsSidebar(); showSuccessGlow(); showChatScreen(); }
+    try { await window.AppDatabase.deleteSubject(currentSubject.id); localStorage.removeItem('vox-study-selected-subject-id'); currentSubject=null; await renderSubjectsSidebar(); showSuccessGlow(); showChatScreen(); }
     catch (_) { showToast('No se pudo eliminar la materia.'); }
   });
 
@@ -925,6 +953,11 @@
     }
 
     await renderSubjectsSidebar();
+    const savedSubjectId = localStorage.getItem('vox-study-selected-subject-id');
+    if (savedSubjectId) {
+      const savedSubject = await window.AppDatabase.getSubjectById(savedSubjectId);
+      if (savedSubject) currentSubject = savedSubject; else localStorage.removeItem('vox-study-selected-subject-id');
+    }
 
     notesListTitleEl.textContent = 'Apuntes';
     recentNotesListEl.innerHTML = '';
