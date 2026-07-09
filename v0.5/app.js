@@ -14,7 +14,6 @@
   const chatLogEl = document.getElementById('chat-log');
   const chatInputForm = document.getElementById('chat-input-form');
   const chatTextInput = document.getElementById('chat-text-input');
-  const chatMicBtn = document.getElementById('chat-mic-btn');
 
   const plusMenuBtn = document.getElementById('plus-menu-btn');
   const plusManualNoteBtn = document.getElementById('plus-manual-note-btn');
@@ -29,8 +28,6 @@
   const themeDarkBtn = document.getElementById('theme-dark-btn');
 
   const backToChatBtn = document.getElementById('back-to-chat-btn');
-  const backToBrowsingBtn = document.getElementById('back-to-browsing-btn');
-  const backFromNoteBtn = document.getElementById('back-from-note-btn');
 
   const browsingViewEl = document.getElementById('browsing-view');
   const subjectDetailViewEl = document.getElementById('subject-detail-view');
@@ -116,6 +113,28 @@
     setTimeout(() => toastEl.classList.add('hidden'), 2200);
   }
 
+  let successGlowTimeout = null;
+
+  function showSuccessGlow() {
+    let glowEl = document.getElementById('success-glow');
+    if (!glowEl) {
+      glowEl = document.createElement('div');
+      glowEl.id = 'success-glow';
+      glowEl.className = 'success-glow';
+      glowEl.innerHTML = '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12.5 11 15.5 16 9"/></svg>';
+      document.body.appendChild(glowEl);
+    }
+
+    clearTimeout(successGlowTimeout);
+    glowEl.classList.remove('success-glow-visible');
+    void glowEl.offsetWidth;
+    glowEl.classList.add('success-glow-visible');
+
+    successGlowTimeout = setTimeout(() => {
+      glowEl.classList.remove('success-glow-visible');
+    }, 1300);
+  }
+
   function formatNoteMeta(note) {
     return `${note.subjectName} · ${note.date} ${note.time}`;
   }
@@ -123,14 +142,14 @@
   // ---------- Tema claro / oscuro ----------
 
   function applyTheme(theme) {
-    if (theme === 'dark') {
-      document.body.classList.add('theme-dark');
-      themeDarkBtn.classList.add('active');
-      themeLightBtn.classList.remove('active');
-    } else {
-      document.body.classList.remove('theme-dark');
+    if (theme === 'light') {
+      document.body.classList.add('light-theme');
       themeLightBtn.classList.add('active');
       themeDarkBtn.classList.remove('active');
+    } else {
+      document.body.classList.remove('light-theme');
+      themeDarkBtn.classList.add('active');
+      themeLightBtn.classList.remove('active');
     }
     localStorage.setItem('apuntes-ia-theme', theme);
   }
@@ -215,6 +234,32 @@
     chatLogEl.appendChild(bubble);
     chatLogEl.scrollTop = chatLogEl.scrollHeight;
     notifyAssistantUpdate();
+
+    if (assistantPanel.classList.contains('hidden')) {
+      showChatPopup(text);
+    }
+  }
+
+  let chatPopupTimeout = null;
+
+  function showChatPopup(text) {
+    let popupEl = document.getElementById('chat-popup');
+    if (!popupEl) {
+      popupEl = document.createElement('div');
+      popupEl.id = 'chat-popup';
+      popupEl.className = 'chat-popup';
+      document.body.appendChild(popupEl);
+    }
+
+    popupEl.textContent = text;
+    clearTimeout(chatPopupTimeout);
+    popupEl.classList.remove('chat-popup-visible');
+    void popupEl.offsetWidth;
+    popupEl.classList.add('chat-popup-visible');
+
+    chatPopupTimeout = setTimeout(() => {
+      popupEl.classList.remove('chat-popup-visible');
+    }, 2000);
   }
 
   async function sendChatMessage(text) {
@@ -283,33 +328,6 @@
     sendChatMessage(text);
   });
 
-  chatMicBtn.addEventListener('click', async () => {
-    if (!window.SpeechController.isSupported) {
-      showToast('Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.');
-      return;
-    }
-
-    chatMicBtn.textContent = '🔴';
-    await window.SpeechController.startCommandMode({
-      onResult: ({ finalText, interimText }) => {
-        chatTextInput.value = finalText || interimText;
-        if (finalText) {
-          chatMicBtn.textContent = '🎤';
-          window.SpeechController.stop();
-        }
-      },
-      onError: () => {
-        chatMicBtn.textContent = '🎤';
-        showToast('No se pudo escuchar el micrófono.');
-      },
-      onEnd: () => {
-        chatMicBtn.textContent = '🎤';
-      },
-      onStart: () => {},
-      onSilenceTimeout: () => {},
-    });
-  });
-
   // ---------- Orbe central: dispara directo el comando de voz ----------
 
   plusMenuBtn.addEventListener('click', () => {
@@ -329,6 +347,12 @@
 
   cancelManualNoteBtn.addEventListener('click', () => {
     manualNoteModal.classList.add('hidden');
+  });
+
+  manualNoteModal.addEventListener('click', (event) => {
+    if (event.target === manualNoteModal) {
+      manualNoteModal.classList.add('hidden');
+    }
   });
 
   // ---------- Panel flotante del asistente (chat) ----------
@@ -371,7 +395,29 @@
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !assistantPanel.classList.contains('hidden')) {
+    if (event.key !== 'Escape') return;
+
+    if (!noteDetailViewEl.classList.contains('hidden')) {
+      closeNoteDetailView();
+      return;
+    }
+    if (!manualNoteModal.classList.contains('hidden')) {
+      manualNoteModal.classList.add('hidden');
+      return;
+    }
+    if (!addSubjectModal.classList.contains('hidden')) {
+      addSubjectModal.classList.add('hidden');
+      return;
+    }
+    if (!commandModal.classList.contains('hidden')) {
+      closeCommandModal();
+      return;
+    }
+    if (!dictationModal.classList.contains('hidden')) {
+      endDictationSession(false);
+      return;
+    }
+    if (!assistantPanel.classList.contains('hidden')) {
       closeAssistantPanel();
     }
   });
@@ -396,7 +442,7 @@
         durationSeconds: 0,
       });
       manualNoteModal.classList.add('hidden');
-      showToast('Apunte guardado.');
+      showSuccessGlow();
       await renderSubjectsSidebar();
       appendAssistantBubble(`Guardé tu apunte "${title}" en ${subjectName}.`);
     } catch (error) {
@@ -416,6 +462,12 @@
     addSubjectModal.classList.add('hidden');
   });
 
+  addSubjectModal.addEventListener('click', (event) => {
+    if (event.target === addSubjectModal) {
+      addSubjectModal.classList.add('hidden');
+    }
+  });
+
   saveSubjectBtn.addEventListener('click', async () => {
     const name = newSubjectInput.value.trim();
     if (!name) {
@@ -425,7 +477,7 @@
     try {
       await window.AppDatabase.createSubject(name);
       addSubjectModal.classList.add('hidden');
-      showToast('Materia creada.');
+      showSuccessGlow();
       await renderSubjectsSidebar();
     } catch (error) {
       showToast('No se pudo crear la materia.');
@@ -451,8 +503,23 @@
     viewToShow.classList.remove('hidden');
   }
 
-  backToBrowsingBtn.addEventListener('click', showChatScreen);
-  backFromNoteBtn.addEventListener('click', () => { noteDetailViewEl.classList.add('hidden'); });
+  function closeNoteDetailView({ skipConfirm } = {}) {
+    const isEditing = !noteEditForm.classList.contains('hidden');
+
+    if (isEditing && !skipConfirm) {
+      const wantsSave = window.confirm(
+        'Tienes cambios sin guardar en este apunte.\n\nAceptar: guardar cambios.\nCancelar: descartar cambios.'
+      );
+      if (wantsSave) {
+        saveNoteEditBtn.click();
+        return;
+      }
+    }
+
+    closeNoteEditForm();
+    noteDetailViewEl.classList.add('hidden');
+    currentlyViewedNote = null;
+  }
 
   function buildNoteCard(note) {
     const card = document.createElement('div');
@@ -497,6 +564,12 @@
     noteDetailViewEl.classList.remove('hidden');
   }
 
+  noteDetailViewEl.addEventListener('click', (event) => {
+    if (event.target === noteDetailViewEl) {
+      closeNoteDetailView();
+    }
+  });
+
   deleteNoteBtn.addEventListener('click', async () => {
     if (!currentlyViewedNote) return;
     const confirmed = window.confirm('¿Eliminar este apunte? Esta acción no se puede deshacer.');
@@ -504,7 +577,7 @@
 
     try {
       await window.AppDatabase.deleteNote(currentlyViewedNote.id);
-      showToast('Apunte eliminado.');
+      showSuccessGlow();
       currentlyViewedNote = null;
       noteDetailViewEl.classList.add('hidden');
       await renderSubjectsSidebar();
@@ -520,11 +593,15 @@
     noteEditContentInput.value = currentlyViewedNote.content;
     noteEditForm.classList.remove('hidden');
     noteDetailContentEl.classList.add('hidden');
+    editNoteBtn.classList.add('hidden');
+    deleteNoteBtn.classList.add('hidden');
   }
 
   function closeNoteEditForm() {
     noteEditForm.classList.add('hidden');
     noteDetailContentEl.classList.remove('hidden');
+    editNoteBtn.classList.remove('hidden');
+    deleteNoteBtn.classList.remove('hidden');
   }
 
   editNoteBtn.addEventListener('click', openNoteEditForm);
@@ -549,7 +626,8 @@
       noteDetailTitleEl.textContent = updated.title;
       noteDetailContentEl.textContent = updated.content;
       closeNoteEditForm();
-      showToast('Apunte actualizado.');
+      showSuccessGlow();
+      await renderSubjectsSidebar();
     } catch (error) {
       showToast('No se pudo guardar el apunte.');
     }
@@ -745,7 +823,7 @@
         content,
         durationSeconds,
       });
-      showToast('Apunte guardado correctamente.');
+      showSuccessGlow();
       const aiMessage = ai?.summary ? ` Resumen IA: ${ai.summary}` : '';
       appendAssistantBubble(`Guardé tu apunte "${title}" en ${dictationSession.subjectName}.${aiMessage}`);
       await renderSubjectsSidebar();
